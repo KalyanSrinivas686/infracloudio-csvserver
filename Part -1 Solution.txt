@@ -1,0 +1,76 @@
+﻿Part -1 Solution 
+
+
+# Step 1: Run the container and check its status
+# Run the container in the background
+sudo docker run -d --name csvserver infracloudio/csvserver:latest
+
+
+# Check if the container is running
+if ! sudo docker ps | grep -q csvserver; then
+    echo "Container failed to start. Checking logs for reasons..."
+    sudo docker logs csvserver
+    # Likely the reason is that the container requires a file named `inputFile` to be mounted.
+fi
+
+
+# Step 2: Write the gencsv.sh script
+cat << 'EOF' > gencsv.sh
+#!/bin/bash
+if [ "$#" -ne 2 ]; then
+    echo "Usage: ./gencsv.sh <start_index> <end_index>"
+    exit 1
+fi
+
+
+start_index=$1
+end_index=$2
+
+
+if ! [[ "$start_index" =~ ^[0-9]+$ ]] || ! [[ "$end_index" =~ ^[0-9]+$ ]]; then
+    echo "Both arguments must be integers."
+    exit 1
+fi
+
+
+if [ "$start_index" -ge "$end_index" ]; then
+    echo "<start_index> must be less than <end_index>."
+    exit 1
+fi
+
+
+> inputFile
+for i in $(seq $start_index $end_index); do
+    echo "$i, $((RANDOM % 1000))" >> inputFile
+done
+EOF
+
+
+# Make the script executable
+chmod +x gencsv.sh
+
+
+# Step 3: Generate inputFile
+./gencsv.sh 2 8
+
+
+# Step 4: Run the container again with the generated file
+sudo docker rm -f csvserver 2>/dev/null
+sudo docker run -d --name csvserver -v "$PWD/inputFile:/csvserver/inputFile" infracloudio/csvserver:latest
+
+
+# Get shell access and check the port
+sudo docker exec -it csvserver sh -c "cat /etc/services | grep csvserver" # Or look at the application logs
+sudo docker logs csvserver | grep 'listening on'
+
+
+# Step 5: Run the container with application accessible on host
+sudo docker rm -f csvserver 2>/dev/null
+sudo docker run -d --name csvserver -p 9393:9300 -v "$PWD/inputFile:/csvserver/inputFile" -e CSVSERVER_BORDER=Orange infracloudio/csvserver:latest
+
+
+# Verify the application is running
+if curl -s http://localhost:9393 | grep -q 'csvserver'; then
+    echo "Application is accessible at http://localhost:9393 with orange border."
+else
+    echo "Failed to access application. Check logs or configuration."
